@@ -2,8 +2,8 @@ name: Automated Steam Price Update
 
 on:
   schedule:
-    - cron: '0 * * * *' # Запуск робота автоматически каждый час
-  workflow_dispatch: # Позволяет запускать обновление вручную кнопкой
+    - cron: '0 * * * *' # Автоматический запуск каждый час
+  workflow_dispatch: # Кнопка ручного запуска
 
 jobs:
   update-prices:
@@ -12,28 +12,42 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Fetch fresh prices from Steam Central Index
+    - name: Fetch Live Prices Directly From Steam
       run: |
-        # Скачиваем свежий кэш цен в рублях, к которому у Стима нет претензий
-        curl -s "https://jsdelivr.net" > raw_base.json
+        # Используем официальный поисковый движок Steam, который для серверов GitHub всегда открыт
+        curl -s "https://steamcommunity.com" > steam_raw.json
         
-        # Пересобираем тяжелую базу в легкий плоский файл чисто под ваш список предметов
+        # Пересобираем данные в плоский JSON-файл цен
         node -e '
           const fs = require("fs");
-          const raw = JSON.parse(fs.readFileSync("raw_base.json", "utf8"));
-          const prices = raw["730"] || {};
-          const result = {};
-          for (let key in prices) {
-            result[key.toLowerCase().trim()] = prices[key].lowest_price || prices[key].median_price || prices[key].suggested_price || 0;
+          try {
+            const raw = JSON.parse(fs.readFileSync("steam_raw.json", "utf8"));
+            if (!raw || !raw.results) throw new Error("Empty Steam response");
+            
+            const result = {};
+            raw.results.forEach(item => {
+              if (item.hash_name && item.sell_min_price) {
+                result[item.hash_name.toLowerCase().trim()] = item.sell_min_price / 100;
+              }
+            });
+            
+            // Если Steam отдал данные, перезаписываем файл цен
+            if (Object.keys(result).length > 0) {
+              fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
+              console.log("Prices successfully updated directly from Valve servers!");
+            } else {
+              console.log("No prices found in response, keeping old cache.");
+            }
+          } catch(e) {
+            console.error("Failed to parse Steam response:", e.message);
           }
-          fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
         '
-        rm raw_base.json
+        rm steam_raw.json
 
     - name: Commit and push changes back to landing
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@://github.com"
         git add prices.json
-        git diff-index --quiet HEAD || git commit -m "Automated hourly market price sync"
+        git diff-index --quiet HEAD || git commit -m "Automated live market price sync from Steam"
         git push
