@@ -14,35 +14,76 @@ jobs:
 
     - name: Fetch Live Prices Directly From Steam
       run: |
-        # Используем официальный поисковый движок Steam, который для серверов GitHub всегда открыт
-        curl -s "https://steamcommunity.com" > steam_raw.json
+           - name: Fetch Live Prices Directly From Steam
+      run: |
+        # Создаем пустой файл базы данных
+        echo "{}" > prices.json
         
-        # Пересобираем данные в плоский JSON-файл цен
+        # Массив ваших предметов для точечного опроса Steam в рублях (currency=5)
+        # Робот поочередно зайдет в каждый предмет и заберет точную цену ТП
         node -e '
           const fs = require("fs");
-          try {
-            const raw = JSON.parse(fs.readFileSync("steam_raw.json", "utf8"));
-            if (!raw || !raw.results) throw new Error("Empty Steam response");
-            
-            const result = {};
-            raw.results.forEach(item => {
-              if (item.hash_name && item.sell_min_price) {
-                result[item.hash_name.toLowerCase().trim()] = item.sell_min_price / 100;
-              }
-            });
-            
-            // Если Steam отдал данные, перезаписываем файл цен
-            if (Object.keys(result).length > 0) {
-              fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
-              console.log("Prices successfully updated directly from Valve servers!");
-            } else {
-              console.log("No prices found in response, keeping old cache.");
+          const https = require("https");
+          
+          const items = [
+            "Budapest 2025 Train Souvenir Package",
+            "Budapest 2025 Overpass Souvenir Highlight Package",
+            "Budapest 2025 Inferno Souvenir Package",
+            "Budapest 2025 Nuke Souvenir Highlight Package",
+            "Budapest 2025 Nuke Souvenir Package",
+            "Dreams & Nightmares Case",
+            "AK-47 | Crossfade (Factory New)",
+            "Desert Eagle | Printstream (Factory New)",
+            "Desert Eagle | Conspiracy (Factory New)",
+            "Glock-18 | Vogue (Factory New)",
+            "USP-S | Printstream (Factory New)",
+            "Horizon Case",
+            "Warhammer 40,000 Sticker Capsule",
+            "Warhammer 40,000 Traitor Astartes Sticker Capsule",
+            "Operation Breakout Weapon Case",
+            "Kilowatt Case",
+            "MP7 | Abyssal Apparition",
+            "Austin 2025 Legends Sticker Capsule",
+            "Paris 2023 Inferno Souvenir Package",
+            "Paris 2023 Anubis Souvenir Package",
+            "Fracture Case",
+            "Recoil Case"
+          ];
+          
+          const result = {};
+          
+          async function fetchAll() {
+            for (const item of items) {
+              await new Promise((resolve) => {
+                const encoded = encodeURIComponent(item);
+                // Запрос строго в валюте 5 (Рубли) напрямую к официальному API цен Valve
+                const url = `https://steamcommunity.com{encoded}`;
+                
+                https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+                  let data = "";
+                  res.on("data", (chunk) => data += chunk);
+                  res.on("end", () => {
+                    try {
+                      const json = JSON.parse(data);
+                      if (json && json.success && json.lowest_price) {
+                        // Чистим текст "65,50 руб." до обычного числа 65.50
+                        const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
+                        result[item.toLowerCase().trim()] = priceNum;
+                        console.log(`Successfully fetched ${item}: ${priceNum} RUB`);
+                      }
+                    } catch(e) {}
+                    // Защитная пауза 4 секунды между предметами, чтобы робота не банил Стим
+                    setTimeout(resolve, 4000);
+                  });
+                }).on("error", () => setTimeout(resolve, 4000));
+              });
             }
-          } catch(e) {
-            console.error("Failed to parse Steam response:", e.message);
+            fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
           }
+          
+          fetchAll();
         '
-        rm steam_raw.json
+
 
     - name: Commit and push changes back to landing
       run: |
