@@ -34,7 +34,7 @@ jobs:
             "Warhammer 40,000 Traitor Astartes Sticker Capsule",
             "Operation Breakout Weapon Case",
             "Kilowatt Case",
-            "MP7 | Abyssal Apparition",
+            "MP7 | Abyssal Apparition (Factory New)",
             "Austin 2025 Legends Sticker Capsule",
             "Paris 2023 Inferno Souvenir Package",
             "Paris 2023 Anubis Souvenir Package",
@@ -49,51 +49,56 @@ jobs:
           
           async function fetchAll() {
             for (const item of items) {
-              await new Promise(async (resolve) => {
-                // ИСПРАВЛЕНО: Специальное адаптивное кодирование под строгие фильтры ТП Steam
-                let cleanEncodedName = encodeURIComponent(item)
-                  .replace(/%20/g, " ")
-                  .replace(/%26/g, "&")
-                  .replace(/%2C/g, ",")
-                  .replace(/%7C/g, "|");
-                
-                const urlParts = [
-                  "https://steamcommunity.com",
-                  "market",
-                  "priceoverview"
-                ];
-                const fullUrl = urlParts.join("/") + "/?appid=730&currency=5&market_hash_name=" + cleanEncodedName;
-                
-                try {
-                  const res = await fetch(fullUrl, {
-                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-                  });
+              let success = false;
+              let retries = 3; // 3 попытки штурма Steam при отказе
+              
+              while (!success && retries > 0) {
+                await new Promise(async (resolve) => {
+                  let cleanEncodedName = encodeURIComponent(item)
+                    .replace(/%20/g, " ")
+                    .replace(/%26/g, "&")
+                    .replace(/%2C/g, ",")
+                    .replace(/%7C/g, "|");
                   
-                  if (res.status === 200) {
-                    const json = await res.json();
-                    if (json && json.success && json.lowest_price) {
-                      const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
-                      result[item.toLowerCase().trim()] = priceNum;
-                      console.log("[УСПЕХ] " + item + ": " + priceNum + " РУБ.");
-                    } else {
-                      // Резервный повторный запрос, если Стим временно проигнорировал предмет
-                      console.log("[ОТКАЗ СТИМА] Нет цены для " + item + ". Пробуем резервный метод...");
-                      if (json && json.volume) {
-                         console.log("Предмет есть на рынке, но нет активных ордеров продажи.");
+                  const urlParts = ["https://steamcommunity.com", "market", "priceoverview"];
+                  const fullUrl = urlParts.join("/") + "/?appid=730&currency=5&market_hash_name=" + cleanEncodedName;
+                  
+                  try {
+                    const res = await fetch(fullUrl, {
+                      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" }
+                    });
+                    
+                    if (res.status === 200) {
+                      const json = await res.json();
+                      if (json && json.success && json.lowest_price) {
+                        const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
+                        result[item.toLowerCase().trim()] = priceNum;
+                        
+                        // Дополнительно записываем имя без качества для совместимости с вашей ячейкой таблицы
+                        if (item.includes(" (")) {
+                          const baseName = item.split(" (")[0].toLowerCase().trim();
+                          result[baseName] = priceNum;
+                        }
+                        
+                        console.log("[УСПЕХ] " + item + ": " + priceNum + " РУБ.");
+                        success = true;
+                      } else {
+                        retries--;
+                        console.log("[ПОВТОР] Стим временно скрыл цену для " + item + ". Осталось попыток: " + retries);
                       }
+                    } else {
+                      retries--;
+                      console.log("[СБОЙ СЕРВЕРА] Код: " + res.status + " для " + item);
                     }
-                  } else if (res.status === 429) {
-                    console.log("[ЛИМИТ ВАЛВ] Стим выдал временный бан 429. Нужно увеличить паузу.");
-                  } else {
-                    console.log("[ОШИБКА СЕРВЕРА] Код: " + res.status + " для " + item);
+                  } catch(e) {
+                    retries--;
+                    console.log("[СБОЙ СЕТИ] Ошибка для " + item + ": " + e.message);
                   }
-                } catch(e) {
-                  console.log("[СБОЙ СЕТИ] Ошибка для " + item + ": " + e.message);
-                }
-                
-                // Пауза 14 секунд между запросами
-                setTimeout(resolve, 14000);
-              });
+                  
+                  // Пауза 14 секунд между попытками
+                  setTimeout(resolve, 14000);
+                });
+              }
             }
             
             result["last_updated_time_mark"] = new Date().toISOString();
@@ -108,5 +113,5 @@ jobs:
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@://github.com"
         git add prices.json
-        git diff-index --quiet HEAD || git commit -m "Automated live market price sync from Steam in RUB"
+        git diff-index --quiet HEAD || git commit -m "Automated live market price sync from Steam in RUB with retry logic"
         git push
