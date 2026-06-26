@@ -16,7 +16,6 @@ jobs:
       run: |
         node -e '
           const fs = require("fs");
-          const https = require("https");
           
           const items = [
             "Budapest 2025 Train Souvenir Package",
@@ -50,34 +49,40 @@ jobs:
           
           async function fetchAll() {
             for (const item of items) {
-              await new Promise((resolve) => {
+              await new Promise(async (resolve) => {
                 const encoded = encodeURIComponent(item);
                 
-                // ИСПРАВЛЕНО НАМЕРТВО: Монолитное склеивание URL-строки без использования опасных обратных кавычек
-                const url = "https://steamcommunity.com" + encoded;
+                // ОБХОД ФИЛЬТРА YAML: Собираем адрес по элементам массива, исключая любые склейки в строке
+                const urlParts = [
+                  "https://steamcommunity.com",
+                  "market",
+                  "priceoverview"
+                ];
+                const fullUrl = urlParts.join("/") + "/?appid=730&currency=5&market_hash_name=" + encoded;
                 
-                https.get(url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }, (res) => {
-                  let data = "";
-                  res.on("data", (chunk) => data += chunk);
-                  res.on("end", () => {
-                    try {
-                      const json = JSON.parse(data);
-                      if (json && json.success && json.lowest_price) {
-                        const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
-                        result[item.toLowerCase().trim()] = priceNum;
-                        console.log("[УСПЕХ] " + item + ": " + priceNum + " РУБ.");
-                      } else {
-                        console.log("[ОТКАЗ СТИМА] Предмет: " + item + ". Ответ Valve: " + data.trim().substring(0, 100));
-                      }
-                    } catch(e) {
-                      console.log("[ОШИБКА ПАРСИНГА] Предмет: " + item + ". Код сервера: " + res.statusCode);
-                    }
-                    setTimeout(resolve, 14000);
+                try {
+                  const res = await fetch(fullUrl, {
+                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
                   });
-                }).on("error", (err) => {
-                  console.log("[СЕТЕВАЯ ОШИБКА] " + item + ": " + err.message);
-                  setTimeout(resolve, 14000);
-                });
+                  
+                  if (res.status === 200) {
+                    const json = await res.json();
+                    if (json && json.success && json.lowest_price) {
+                      const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
+                      result[item.toLowerCase().trim()] = priceNum;
+                      console.log("[УСПЕХ] " + item + ": " + priceNum + " РУБ.");
+                    } else {
+                      console.log("[ОТКАЗ СТИМА] Нет цены для " + item);
+                    }
+                  } else {
+                    console.log("[ОШИБКА СЕРВЕРА] Код: " + res.status + " для " + item);
+                  }
+                } catch(e) {
+                  console.log("[СБОЙ СЕТИ] Ошибка для " + item + ": " + e.message);
+                }
+                
+                // Пауза 14 секунд между запросами для защиты от банов по IP
+                setTimeout(resolve, 14000);
               });
             }
             
