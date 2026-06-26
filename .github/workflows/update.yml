@@ -12,7 +12,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Sync Prices From Global CS2 Database
+    - name: Sync Live Prices From Pure Steam Mirror
       run: |
         node -e '
           const fs = require("fs");
@@ -42,36 +42,10 @@ jobs:
             "Recoil Case"
           ];
           
-          // РЕЗЕРВНЫЙ СЛЕПОК ЦЕН НА СЛУЧАЙ ПАДЕНИЯ СЕТИ НА GITHUB
-          const fallbackDb = {
-            "budapest 2025 train souvenir package": 311.83,
-            "budapest 2025 overpass souvenir highlight package": 327.55,
-            "budapest 2025 inferno souvenir package": 301.77,
-            "budapest 2025 nuke souvenir highlight package": 338.17,
-            "budapest 2025 nuke souvenir package": 311.07,
-            "dreams & nightmares case": 78.30,
-            "ak-47 | crossfade (factory new)": 741.00,
-            "desert eagle | printstream (factory new)": 8151.11,
-            "desert eagle | conspiracy (factory new)": 2935.32,
-            "glock-18 | vogue (factory new)": 1827.54,
-            "usp-s | printstream (factory new)": 11931.96,
-            "horizon case": 183.73,
-            "warhammer 40,000 sticker capsule": 76.85,
-            "warhammer 40,000 traitor astartes sticker capsule": 74.98,
-            "operation breakout weapon case": 848.07,
-            "kilowatt case": 17.67,
-            "mp7 | abyssal apparition (factory new)": 2003.73,
-            "austin 2025 legends sticker capsule": 23.74,
-            "paris 2023 inferno souvenir package": 207.38,
-            "paris 2023 anubis souvenir package": 191.18,
-            "fracture case": 57.81,
-            "recoil case": 22.40
-          };
-          
-          async function fetchFromMirror() {
-            const url = "https://githubusercontent.com";
+          async function fetchLivePrices() {
+            // Подключаем бронебойное азиатское зеркало цен Steam, работающее без блокировок и капч Cloudflare
+            const url = "https://githack.com";
             const result = {};
-            let isLoadedFromNetwork = false;
             
             try {
               const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
@@ -83,33 +57,27 @@ jobs:
                 itemsToFind.forEach(name => {
                   const targetData = steamPrices[name];
                   if (targetData) {
+                    // Вытаскиваем абсолютно РЕАЛЬНУЮ И ЖИВУЮ минимальную цену ТП на текущий час
                     const price = targetData.lowest_price || targetData.median_price || targetData.suggested_price || 0;
                     result[name.toLowerCase().trim()] = price;
                   }
                 });
-                isLoadedFromNetwork = true;
-                console.log("Цены успешно синхронизированы через живую CDN-базу!");
+                
+                // Совместимость имени MP7 для вашей таблицы
+                result["mp7 | abyssal apparition"] = result["mp7 | abyssal apparition (factory new)"];
+                
+                result["last_updated_time_mark"] = new Date().toISOString();
+                fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
+                console.log("[ЖИВОЙ УСПЕХ] База цен успешно обновлена со Steam Торговой Площадки!");
+              } else {
+                throw new Error("Server response code: " + res.status);
               }
             } catch(e) {
-              console.log("[СЕТЬ ДАТА-ЦЕНТРА МИГНУЛА] Включаем локальный автономный режим безопасности...");
+              console.log("[ОШИБКА ОБНОВЛЕНИЯ] Не удалось связаться с живым сервером: " + e.message);
             }
-            
-            // Если сеть подвела, мгновенно страхуем базу встроенными данными
-            if (!isLoadedFromNetwork || Object.keys(result).length === 0) {
-              for (const key in fallbackDb) {
-                result[key] = fallbackDb[key];
-              }
-              console.log("Автономный режим: Все 22 позиции успешно застрахованы резервным кэшем!");
-            }
-            
-            // Совместимость с именем без качества для MP7
-            result["mp7 | abyssal apparition"] = result["mp7 | abyssal apparition (factory new)"];
-            
-            result["last_updated_time_mark"] = new Date().toISOString();
-            fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
           }
           
-          fetchFromMirror();
+          fetchLivePrices();
         '
 
     - name: Commit and push changes back to landing
@@ -117,5 +85,5 @@ jobs:
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@://github.com"
         git add prices.json
-        git diff-index --quiet HEAD || git commit -m "Automated market price sync via CDN mirror with fallback"
+        git diff-index --quiet HEAD || git commit -m "Automated hourly live price injection"
         git push
