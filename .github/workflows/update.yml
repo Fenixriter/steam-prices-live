@@ -17,7 +17,7 @@ jobs:
         node -e '
           const fs = require("fs");
           
-          const items = [
+          const itemsToFind = [
             "Budapest 2025 Train Souvenir Package",
             "Budapest 2025 Overpass Souvenir Highlight Package",
             "Budapest 2025 Inferno Souvenir Package",
@@ -47,65 +47,49 @@ jobs:
             try { result = JSON.parse(fs.readFileSync("prices.json", "utf8")); } catch(e) {}
           }
           
-          async function fetchAll() {
-            for (const item of items) {
-              let success = false;
-              let retries = 3; // 3 попытки штурма Steam при отказе
+          async function fetchBulk() {
+            // ДЕЛАЕМ ВСЕГО 1 ЗАПРОС к рендереру ТП, запрашивая первые 100 популярных предметов
+            const url = "https://steamcommunity.com";
+            
+            try {
+              const res = await fetch(url, {
+                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" }
+              });
               
-              while (!success && retries > 0) {
-                await new Promise(async (resolve) => {
-                  let cleanEncodedName = encodeURIComponent(item)
-                    .replace(/%20/g, " ")
-                    .replace(/%26/g, "&")
-                    .replace(/%2C/g, ",")
-                    .replace(/%7C/g, "|");
+              if (res.status === 200) {
+                const json = await res.json();
+                if (json && json.results) {
                   
-                  const urlParts = ["https://steamcommunity.com", "market", "priceoverview"];
-                  const fullUrl = urlParts.join("/") + "/?appid=730&currency=5&market_hash_name=" + cleanEncodedName;
-                  
-                  try {
-                    const res = await fetch(fullUrl, {
-                      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" }
-                    });
+                  // Перебираем всё, что отдал Стим, и сверяем с нашим списком
+                  json.results.forEach(marketItem => {
+                    const hashName = marketItem.hash_name;
                     
-                    if (res.status === 200) {
-                      const json = await res.json();
-                      if (json && json.success && json.lowest_price) {
-                        const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
-                        result[item.toLowerCase().trim()] = priceNum;
-                        
-                        // Дополнительно записываем имя без качества для совместимости с вашей ячейкой таблицы
-                        if (item.includes(" (")) {
-                          const baseName = item.split(" (")[0].toLowerCase().trim();
-                          result[baseName] = priceNum;
+                    itemsToFind.forEach(myName => {
+                      // Проверяем совпадение (без учета регистра)
+                      if (hashName.toLowerCase().trim() === myName.toLowerCase().trim()) {
+                        if (marketItem.sell_min_price) {
+                          const priceRUB = marketItem.sell_min_price / 100;
+                          result[myName.toLowerCase().trim()] = priceRUB;
+                          console.log("[ПАКЕТНЫЙ УСПЕХ] " + myName + ": " + priceRUB + " РУБ.");
                         }
-                        
-                        console.log("[УСПЕХ] " + item + ": " + priceNum + " РУБ.");
-                        success = true;
-                      } else {
-                        retries--;
-                        console.log("[ПОВТОР] Стим временно скрыл цену для " + item + ". Осталось попыток: " + retries);
                       }
-                    } else {
-                      retries--;
-                      console.log("[СБОЙ СЕРВЕРА] Код: " + res.status + " для " + item);
-                    }
-                  } catch(e) {
-                    retries--;
-                    console.log("[СБОЙ СЕТИ] Ошибка для " + item + ": " + e.message);
-                  }
-                  
-                  // Пауза 14 секунд между попытками
-                  setTimeout(resolve, 14000);
-                });
+                    });
+                  });
+                }
+              } else {
+                console.log("[ОШИБКА СЕРВЕРА] Код: " + res.status);
               }
+            } catch(e) {
+              console.log("[СБОЙ СЕТИ] " + e.message);
             }
             
+            // Сохраняем результат
             result["last_updated_time_mark"] = new Date().toISOString();
             fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
+            console.log("Пакетная синхронизация завершена успешно!");
           }
           
-          fetchAll();
+          fetchBulk();
         '
 
     - name: Commit and push changes back to landing
@@ -113,5 +97,5 @@ jobs:
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@://github.com"
         git add prices.json
-        git diff-index --quiet HEAD || git commit -m "Automated live market price sync from Steam in RUB with retry logic"
+        git diff-index --quiet HEAD || git commit -m "Automated live market price sync via bulk API"
         git push
