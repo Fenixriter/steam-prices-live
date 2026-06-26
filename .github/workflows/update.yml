@@ -43,7 +43,6 @@ jobs:
             "Recoil Case"
           ];
           
-          // Проверяем, существует ли старый файл, или создаем пустой объект
           let result = {};
           if (fs.existsSync("prices.json")) {
             try { result = JSON.parse(fs.readFileSync("prices.json", "utf8")); } catch(e) {}
@@ -53,7 +52,9 @@ jobs:
             for (const item of items) {
               await new Promise((resolve) => {
                 const encoded = encodeURIComponent(item);
-                const url = `https://steamcommunity.com{encoded}`;
+                
+                // ИСПРАВЛЕНО НАМЕРТВО: Монолитное склеивание URL-строки без использования опасных обратных кавычек
+                const url = "https://steamcommunity.com" + encoded;
                 
                 https.get(url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }, (res) => {
                   let data = "";
@@ -64,23 +65,22 @@ jobs:
                       if (json && json.success && json.lowest_price) {
                         const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
                         result[item.toLowerCase().trim()] = priceNum;
-                        console.log(`[УСПЕХ] ${item}: ${priceNum} РУБ.`);
+                        console.log("[УСПЕХ] " + item + ": " + priceNum + " РУБ.");
                       } else {
-                        console.log(`[ОТКАЗ СТИМА] Предмет: ${item}. Ответ Valve: ${data.trim().substring(0, 100)}`);
+                        console.log("[ОТКАЗ СТИМА] Предмет: " + item + ". Ответ Valve: " + data.trim().substring(0, 100));
                       }
                     } catch(e) {
-                      console.log(`[ОШИБКА ПАРСИНГА] Предмет: ${item}. Код сервера: ${res.statusCode}. Текст: ${data.trim().substring(0, 100)}`);
+                      console.log("[ОШИБКА ПАРСИНГА] Предмет: " + item + ". Код сервера: " + res.statusCode);
                     }
                     setTimeout(resolve, 14000);
                   });
                 }).on("error", (err) => {
-                  console.log(`[СЕТЕВАЯ ОШИБКА] ${item}: ${err.message}`);
+                  console.log("[СЕТЕВАЯ ОШИБКА] " + item + ": " + err.message);
                   setTimeout(resolve, 14000);
                 });
               });
             }
             
-            // Добавляем в файл техническую метку времени, чтобы точно видеть, что файл перезаписан
             result["last_updated_time_mark"] = new Date().toISOString();
             fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
           }
