@@ -14,13 +14,7 @@ jobs:
 
     - name: Fetch Live Prices Directly From Steam
       run: |
-           - name: Fetch Live Prices Directly From Steam
-      run: |
-        # Создаем пустой файл базы данных
         echo "{}" > prices.json
-        
-        # Массив ваших предметов для точечного опроса Steam в рублях (currency=5)
-        # Робот поочередно зайдет в каждый предмет и заберет точную цену ТП
         node -e '
           const fs = require("fs");
           const https = require("https");
@@ -56,26 +50,30 @@ jobs:
             for (const item of items) {
               await new Promise((resolve) => {
                 const encoded = encodeURIComponent(item);
-                // Запрос строго в валюте 5 (Рубли) напрямую к официальному API цен Valve
                 const url = `https://steamcommunity.com{encoded}`;
                 
-                https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+                https.get(url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }, (res) => {
                   let data = "";
                   res.on("data", (chunk) => data += chunk);
                   res.on("end", () => {
                     try {
                       const json = JSON.parse(data);
                       if (json && json.success && json.lowest_price) {
-                        // Чистим текст "65,50 руб." до обычного числа 65.50
                         const priceNum = parseFloat(json.lowest_price.replace(/[^\d.,]/g, "").replace(",", "."));
                         result[item.toLowerCase().trim()] = priceNum;
                         console.log(`Successfully fetched ${item}: ${priceNum} RUB`);
+                      } else {
+                        console.log(`No lowest_price for ${item}, skipping.`);
                       }
-                    } catch(e) {}
-                    // Защитная пауза 4 секунды между предметами, чтобы робота не банил Стим
+                    } catch(e) {
+                      console.log(`Failed to parse response for ${item}`);
+                    }
                     setTimeout(resolve, 4000);
                   });
-                }).on("error", () => setTimeout(resolve, 4000));
+                }).on("error", () => {
+                  console.log(`Network error for ${item}`);
+                  setTimeout(resolve, 4000);
+                });
               });
             }
             fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
@@ -84,11 +82,10 @@ jobs:
           fetchAll();
         '
 
-
     - name: Commit and push changes back to landing
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@://github.com"
         git add prices.json
-        git diff-index --quiet HEAD || git commit -m "Automated live market price sync from Steam"
+        git diff-index --quiet HEAD || git commit -m "Automated live market price sync from Steam in RUB"
         git push
