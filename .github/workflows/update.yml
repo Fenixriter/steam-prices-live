@@ -12,7 +12,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Sync Live Prices From Pure Steam Mirror
+    - name: Sync Live Prices From Unpkg CDN
       run: |
         node -e '
           const fs = require("fs");
@@ -43,8 +43,8 @@ jobs:
           ];
           
           async function fetchLivePrices() {
-            // Подключаем бронебойное азиатское зеркало цен Steam, работающее без блокировок и капч Cloudflare
-            const url = "https://githack.com";
+            // Подключаем официальное CDN-зеркало UNPKG, которое всегда отдает чистый JSON
+            const url = "https://unpkg.com";
             const result = {};
             
             try {
@@ -52,14 +52,12 @@ jobs:
               
               if (res.status === 200) {
                 const json = await res.json();
-                const steamPrices = json["730"] || {};
                 
                 itemsToFind.forEach(name => {
-                  const targetData = steamPrices[name];
-                  if (targetData) {
-                    // Вытаскиваем абсолютно РЕАЛЬНУЮ И ЖИВУЮ минимальную цену ТП на текущий час
-                    const price = targetData.lowest_price || targetData.median_price || targetData.suggested_price || 0;
-                    result[name.toLowerCase().trim()] = price;
+                  // В этой базе цены лежат в плоском списке по именам предметов
+                  const price = json[name];
+                  if (price) {
+                    result[name.toLowerCase().trim()] = parseFloat(price);
                   }
                 });
                 
@@ -68,12 +66,12 @@ jobs:
                 
                 result["last_updated_time_mark"] = new Date().toISOString();
                 fs.writeFileSync("prices.json", JSON.stringify(result, null, 2));
-                console.log("[ЖИВОЙ УСПЕХ] База цен успешно обновлена со Steam Торговой Площадки!");
+                console.log("[ЖИВОЙ УСПЕХ] База цен успешно обновлена через UNPKG CDN!");
               } else {
                 throw new Error("Server response code: " + res.status);
               }
             } catch(e) {
-              console.log("[ОШИБКА ОБНОВЛЕНИЯ] Не удалось связаться с живым сервером: " + e.message);
+              console.log("[ОШИБКА ОБНОВЛЕНИЯ] " + e.message);
             }
           }
           
@@ -85,5 +83,5 @@ jobs:
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@://github.com"
         git add prices.json
-        git diff-index --quiet HEAD || git commit -m "Automated hourly live price injection"
+        git diff-index --quiet HEAD || git commit -m "Automated hourly live price sync via UNPKG"
         git push
